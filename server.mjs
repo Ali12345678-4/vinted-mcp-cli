@@ -7,6 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 const PORT = process.env.PORT || 3000;
+const MCP_API_KEY = process.env.MCP_API_KEY;
 
 async function loadVintedApi() {
   try {
@@ -20,6 +21,18 @@ async function loadVintedApi() {
 
 function toText(value) {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function isAuthorized(req) {
+  if (!MCP_API_KEY) return true;
+
+  const authHeader = req.headers.authorization || "";
+  const apiKeyHeader = req.headers["x-api-key"] || "";
+
+  if (authHeader === `Bearer ${MCP_API_KEY}`) return true;
+  if (apiKeyHeader === MCP_API_KEY) return true;
+
+  return false;
 }
 
 async function createServer() {
@@ -67,7 +80,7 @@ async function createServer() {
           content: [
             {
               type: "text",
-              text: "searchItems is not exported from dist/index.js yet. Copy your existing search implementation into dist/index.js exports first."
+              text: "searchItems is not exported from dist/index.js yet."
             }
           ]
         };
@@ -106,7 +119,7 @@ async function createServer() {
           content: [
             {
               type: "text",
-              text: "getItem is not exported from dist/index.js yet. Copy your existing item lookup implementation into dist/index.js exports first."
+              text: "getItem is not exported from dist/index.js yet."
             }
           ]
         };
@@ -136,7 +149,7 @@ async function createServer() {
           content: [
             {
               type: "text",
-              text: "getSeller is not exported from dist/index.js yet. Copy your existing seller lookup implementation into dist/index.js exports first."
+              text: "getSeller is not exported from dist/index.js yet."
             }
           ]
         };
@@ -167,7 +180,7 @@ async function createServer() {
           content: [
             {
               type: "text",
-              text: "comparePrices is not exported from dist/index.js yet. Copy your existing compare implementation into dist/index.js exports first."
+              text: "comparePrices is not exported from dist/index.js yet."
             }
           ]
         };
@@ -197,7 +210,7 @@ async function createServer() {
           content: [
             {
               type: "text",
-              text: "getTrending is not exported from dist/index.js yet. Copy your existing trending implementation into dist/index.js exports first."
+              text: "getTrending is not exported from dist/index.js yet."
             }
           ]
         };
@@ -223,6 +236,12 @@ const httpServer = http.createServer(async (req, res) => {
   if (url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (url.pathname === "/mcp" && !isAuthorized(req)) {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Unauthorized" }));
     return;
   }
 
