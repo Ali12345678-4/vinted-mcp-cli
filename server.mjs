@@ -1,6 +1,5 @@
 import http from "node:http";
 import { URL } from "node:url";
-import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -11,8 +10,7 @@ const MCP_API_KEY = process.env.MCP_API_KEY;
 
 async function loadVintedApi() {
   try {
-    const mod = await import("./dist/index.js");
-    return mod;
+    return await import("./dist/index.js");
   } catch (error) {
     console.error("Could not import ./dist/index.js", error);
     return {};
@@ -27,10 +25,15 @@ function isAuthorized(req) {
   if (!MCP_API_KEY) return true;
 
   const authHeader = req.headers.authorization || "";
-  const apiKeyHeader = req.headers["x-api-key"] || "";
+  const xApiKey = req.headers["x-api-key"] || "";
+  const apiKey = req.headers["api-key"] || "";
+  const apiKeyNoDash = req.headers["apikey"] || "";
 
   if (authHeader === `Bearer ${MCP_API_KEY}`) return true;
-  if (apiKeyHeader === MCP_API_KEY) return true;
+  if (authHeader === MCP_API_KEY) return true;
+  if (xApiKey === MCP_API_KEY) return true;
+  if (apiKey === MCP_API_KEY) return true;
+  if (apiKeyNoDash === MCP_API_KEY) return true;
 
   return false;
 }
@@ -50,12 +53,10 @@ async function createServer() {
       description: "Check whether the Vinted MCP remote server is running.",
       inputSchema: {}
     },
-    async () => {
-      return {
-        content: [{ type: "text", text: "ok" }],
-        structuredContent: { ok: true }
-      };
-    }
+    async () => ({
+      content: [{ type: "text", text: "ok" }],
+      structuredContent: { ok: true }
+    })
   );
 
   server.registerTool(
@@ -77,12 +78,7 @@ async function createServer() {
     async ({ query, country, page, perPage, brand, catalog, minPrice, maxPrice }) => {
       if (typeof api.searchItems !== "function") {
         return {
-          content: [
-            {
-              type: "text",
-              text: "searchItems is not exported from dist/index.js yet."
-            }
-          ]
+          content: [{ type: "text", text: "searchItems is not exported from dist/index.js yet." }]
         };
       }
 
@@ -116,12 +112,7 @@ async function createServer() {
     async ({ itemId }) => {
       if (typeof api.getItem !== "function") {
         return {
-          content: [
-            {
-              type: "text",
-              text: "getItem is not exported from dist/index.js yet."
-            }
-          ]
+          content: [{ type: "text", text: "getItem is not exported from dist/index.js yet." }]
         };
       }
 
@@ -146,12 +137,7 @@ async function createServer() {
     async ({ sellerId }) => {
       if (typeof api.getSeller !== "function") {
         return {
-          content: [
-            {
-              type: "text",
-              text: "getSeller is not exported from dist/index.js yet."
-            }
-          ]
+          content: [{ type: "text", text: "getSeller is not exported from dist/index.js yet." }]
         };
       }
 
@@ -177,12 +163,7 @@ async function createServer() {
     async ({ query, countries }) => {
       if (typeof api.comparePrices !== "function") {
         return {
-          content: [
-            {
-              type: "text",
-              text: "comparePrices is not exported from dist/index.js yet."
-            }
-          ]
+          content: [{ type: "text", text: "comparePrices is not exported from dist/index.js yet." }]
         };
       }
 
@@ -207,12 +188,7 @@ async function createServer() {
     async ({ country }) => {
       if (typeof api.getTrending !== "function") {
         return {
-          content: [
-            {
-              type: "text",
-              text: "getTrending is not exported from dist/index.js yet."
-            }
-          ]
+          content: [{ type: "text", text: "getTrending is not exported from dist/index.js yet." }]
         };
       }
 
@@ -227,8 +203,6 @@ async function createServer() {
 
   return server;
 }
-
-const transports = new Map();
 
 const httpServer = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -251,70 +225,20 @@ const httpServer = http.createServer(async (req, res) => {
     return;
   }
 
-  try {
-    if (req.method === "GET") {
-      const server = await createServer();
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID()
-      });
-
-      await server.connect(transport);
-
-      if (transport.sessionId) {
-        transports.set(transport.sessionId, { transport, server });
-      }
-
-      transport.onclose = async () => {
-        if (transport.sessionId) transports.delete(transport.sessionId);
-      };
-
-      await transport.handleRequest(req, res);
-      return;
-    }
-
-    if (req.method === "POST") {
-      const sessionId = req.headers["mcp-session-id"];
-      let entry = sessionId ? transports.get(sessionId) : undefined;
-
-      if (!entry) {
-        const server = await createServer();
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID()
-        });
-
-        await server.connect(transport);
-
-        if (transport.sessionId) {
-          transports.set(transport.sessionId, { transport, server });
-        }
-
-        transport.onclose = async () => {
-          if (transport.sessionId) transports.delete(transport.sessionId);
-        };
-
-        entry = { transport, server };
-      }
-
-      await entry.transport.handleRequest(req, res);
-      return;
-    }
-
-    if (req.method === "DELETE") {
-      const sessionId = req.headers["mcp-session-id"];
-
-      if (sessionId && transports.has(sessionId)) {
-        const entry = transports.get(sessionId);
-        await entry.transport.close();
-        transports.delete(sessionId);
-      }
-
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
+  if (req.method !== "GET" && req.method !== "POST" && req.method !== "DELETE") {
     res.writeHead(405, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Method not allowed" }));
+    return;
+  }
+
+  try {
+    const server = await createServer();
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined
+    });
+
+    await server.connect(transport);
+    await transport.handleRequest(req, res);
   } catch (error) {
     console.error("MCP HTTP error:", error);
     res.writeHead(500, { "Content-Type": "application/json" });
