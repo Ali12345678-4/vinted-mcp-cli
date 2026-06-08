@@ -8,9 +8,12 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 const PORT = process.env.PORT || 3000;
 const MCP_API_KEY = process.env.MCP_API_KEY;
 
+let _api = null;
 async function loadVintedApi() {
+  if (_api) return _api;
   try {
-    return await import("./dist/index.js");
+    _api = await import("./dist/index.js");
+    return _api;
   } catch (error) {
     console.error("Could not import ./dist/index.js", error);
     return {};
@@ -23,19 +26,21 @@ function toText(value) {
 
 function isAuthorized(req) {
   if (!MCP_API_KEY) return true;
-
   const authHeader = req.headers.authorization || "";
   const xApiKey = req.headers["x-api-key"] || "";
   const apiKey = req.headers["api-key"] || "";
   const apiKeyNoDash = req.headers["apikey"] || "";
-
   if (authHeader === `Bearer ${MCP_API_KEY}`) return true;
   if (authHeader === MCP_API_KEY) return true;
   if (xApiKey === MCP_API_KEY) return true;
   if (apiKey === MCP_API_KEY) return true;
   if (apiKeyNoDash === MCP_API_KEY) return true;
-
   return false;
+}
+
+async function getClient(country = "uk") {
+  const api = await loadVintedApi();
+  return new api.VintedClient({ country });
 }
 
 async function createServer() {
@@ -75,28 +80,26 @@ async function createServer() {
         maxPrice: z.number().optional()
       }
     },
-    async ({ query, country, page, perPage, brand, catalog, minPrice, maxPrice }) => {
-      if (typeof api.searchItems !== "function") {
+    async ({ query, country = "uk", page, perPage, brand, catalog, minPrice, maxPrice }) => {
+      try {
+        const client = await getClient(country);
+        const result = await api.opSearch(client, {
+          query,
+          country,
+          page,
+          perPage,
+          brand,
+          catalog,
+          minPrice,
+          maxPrice
+        });
         return {
-          content: [{ type: "text", text: "searchItems is not exported from dist/index.js yet." }]
+          content: [{ type: "text", text: toText(result) }],
+          structuredContent: result
         };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err.message}` }] };
       }
-
-      const result = await api.searchItems({
-        query,
-        country,
-        page,
-        perPage,
-        brand,
-        catalog,
-        minPrice,
-        maxPrice
-      });
-
-      return {
-        content: [{ type: "text", text: toText(result) }],
-        structuredContent: result
-      };
     }
   );
 
@@ -106,22 +109,21 @@ async function createServer() {
       title: "Get Vinted Item",
       description: "Get a single Vinted item by item ID.",
       inputSchema: {
-        itemId: z.union([z.string(), z.number()])
+        itemId: z.union([z.string(), z.number()]),
+        country: z.string().optional()
       }
     },
-    async ({ itemId }) => {
-      if (typeof api.getItem !== "function") {
+    async ({ itemId, country = "uk" }) => {
+      try {
+        const client = await getClient(country);
+        const result = await api.opGetItem(client, { itemId });
         return {
-          content: [{ type: "text", text: "getItem is not exported from dist/index.js yet." }]
+          content: [{ type: "text", text: toText(result) }],
+          structuredContent: result
         };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err.message}` }] };
       }
-
-      const result = await api.getItem(itemId);
-
-      return {
-        content: [{ type: "text", text: toText(result) }],
-        structuredContent: result
-      };
     }
   );
 
@@ -131,22 +133,21 @@ async function createServer() {
       title: "Get Vinted Seller",
       description: "Get seller information by seller/member ID.",
       inputSchema: {
-        sellerId: z.union([z.string(), z.number()])
+        sellerId: z.union([z.string(), z.number()]),
+        country: z.string().optional()
       }
     },
-    async ({ sellerId }) => {
-      if (typeof api.getSeller !== "function") {
+    async ({ sellerId, country = "uk" }) => {
+      try {
+        const client = await getClient(country);
+        const result = await api.opGetSeller(client, { sellerId });
         return {
-          content: [{ type: "text", text: "getSeller is not exported from dist/index.js yet." }]
+          content: [{ type: "text", text: toText(result) }],
+          structuredContent: result
         };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err.message}` }] };
       }
-
-      const result = await api.getSeller(sellerId);
-
-      return {
-        content: [{ type: "text", text: toText(result) }],
-        structuredContent: result
-      };
     }
   );
 
@@ -161,18 +162,21 @@ async function createServer() {
       }
     },
     async ({ query, countries }) => {
-      if (typeof api.comparePrices !== "function") {
+      try {
+        const results = await Promise.all(
+          countries.map(async (country) => {
+            const client = await getClient(country);
+            const result = await api.opSearch(client, { query, country, perPage: 20 });
+            return { country, items: result.items };
+          })
+        );
         return {
-          content: [{ type: "text", text: "comparePrices is not exported from dist/index.js yet." }]
+          content: [{ type: "text", text: toText(results) }],
+          structuredContent: results
         };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err.message}` }] };
       }
-
-      const result = await api.comparePrices({ query, countries });
-
-      return {
-        content: [{ type: "text", text: toText(result) }],
-        structuredContent: result
-      };
     }
   );
 
@@ -182,22 +186,21 @@ async function createServer() {
       title: "Get Trending Listings",
       description: "Fetch trending or popular Vinted listings for a country.",
       inputSchema: {
-        country: z.string().optional()
+        country: z.string().optional(),
+        limit: z.number().int().positive().optional()
       }
     },
-    async ({ country }) => {
-      if (typeof api.getTrending !== "function") {
+    async ({ country = "uk", limit = 20 }) => {
+      try {
+        const client = await getClient(country);
+        const result = await api.opTrending(client, { country, limit });
         return {
-          content: [{ type: "text", text: "getTrending is not exported from dist/index.js yet." }]
+          content: [{ type: "text", text: toText(result) }],
+          structuredContent: result
         };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err.message}` }] };
       }
-
-      const result = await api.getTrending({ country });
-
-      return {
-        content: [{ type: "text", text: toText(result) }],
-        structuredContent: result
-      };
     }
   );
 
@@ -236,18 +239,15 @@ const httpServer = http.createServer(async (req, res) => {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined
     });
-
     await server.connect(transport);
     await transport.handleRequest(req, res);
   } catch (error) {
     console.error("MCP HTTP error:", error);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        error: "Internal server error",
-        message: error?.message ?? String(error)
-      })
-    );
+    res.end(JSON.stringify({
+      error: "Internal server error",
+      message: error?.message ?? String(error)
+    }));
   }
 });
 
