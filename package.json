@@ -23,6 +23,7 @@
     "clean": "rm -rf dist",
     "cli": "node dist/cli.js",
     "mcp": "node dist/mcp.js",
+    "server": "node server.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
     "test:integration": "INTEGRATION=1 node --test test/integration.test.mjs",
     "prepublishOnly": "npm run clean && npm run build"
